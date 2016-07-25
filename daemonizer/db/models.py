@@ -8,10 +8,10 @@ class Daemonizer:
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, action_type, sleep_time=10, pid_timeout=5):
+    def __init__(self, action_type, sleep_time=10, pid_timeout=5, is_testing=False):
         self.stdin_path = '/dev/null'
-        self.stdout_path = '/dev/tty'
-        self.stderr_path = '/dev/tty'
+        self.stdout_path = '/dev/tty' if not is_testing else '/dev/null' # To prevent error in virtualenv
+        self.stderr_path = '/dev/tty' if not is_testing else '/dev/null' # To prevent error in virtualenv
         self.pidfile_path = '/tmp/%s.pid' % (self.__class__.__name__, )
         
         self.action_type = action_type

@@ -1,6 +1,5 @@
 import os
 import sys
-import shutil
 import unittest
 from glob import glob
 from daemon import runner
@@ -13,7 +12,7 @@ class DaemonExecutioner:
 
     DEFAULT_PROCESS_STRING = 'daemons.%s'
 
-    def __init__(self, daemon_name, pname, action, sleep_time=None, pid_timeout=None):
+    def __init__(self, daemon_name, pname, action, sleep_time=None, pid_timeout=None, is_testing=False):
         """
         Create daemon and process attributes for the given object
         """
@@ -22,7 +21,6 @@ class DaemonExecutioner:
         self.daemon_name = self.DEFAULT_PROCESS_STRING % (daemon_name, )
 
         self.daemon = import_module(self.daemon_name)
-        self.action = action
         
         self.kwargs = {}
         self.kwargs['action_type'] = action
@@ -30,6 +28,8 @@ class DaemonExecutioner:
             self.kwargs['sleep_time'] = sleep_time
         if pid_timeout:
             self.kwargs['pid_timeout'] = pid_timeout
+        if is_testing:
+            self.kwargs['is_testing'] = is_testing
 
     def _success_error_display(self, error_log):
         """
@@ -72,6 +72,69 @@ class DaemonExecutioner:
             error_log[self.pname] = ex
 
         print self._success_error_display(error_log)
+
+class DaemonTester:
+
+    DEFAULT_DAEMON_TEST_STRING = 'daemons.%s.tests'
+    
+    def __init__(self, daemon, test_name):
+        self.test_name = test_name
+        self.daemon_name = self.DEFAULT_DAEMON_TEST_STRING % (daemon, )
+
+        self.daemon = import_module(self.daemon_name)
+
+    def _get_all_test_modules(self):
+        """
+        Steps:
+        1. Find the base path of given package
+        2. Access all the modules belonging to the specified package
+        """
+        l = []
+        module_path = os.path.abspath(self.daemon.__file__).replace('__init__.pyc', 'test_*.py')
+        tests_path_list = glob(module_path)
+        
+        for path in tests_path_list:
+            test_module_name = path.split('/')[-1].replace('.py', '')
+            test_module = import_module('.'.join([self.daemon_name, test_module_name]))
+            l.append(test_module)
+
+        return l
+
+    def _get_all_tests(self):
+        test_modules_list = self._get_all_test_modules()        
+
+        d = {}
+        for test_module in test_modules_list:
+            for key, val in test_module.__dict__.items():
+                # Extraction of valid test cases
+                if isinstance(val, type) and isclass(val) and issubclass(val, unittest.case.TestCase):
+                    d[key] = val
+
+        return d
+
+    def execute(self):
+        suite_list = []
+
+        all_tests = self._get_all_tests()
+
+        # Validation check for the test names provided
+        if self.test_name and self.test_name not in all_tests:
+            raise Exception("Invalid Tests Found: '%s' (Execution Halted)" % (self.test_name, ))
+        elif self.test_name:
+            modules_to_run = [self.test_name]
+        else:
+            # Import all tests for the given daemon app
+            modules_to_run = self._get_all_tests()
+
+        # Run tests
+        for module_name in modules_to_run:
+            module = all_tests.get(module_name)
+            loader = unittest.TestLoader().loadTestsFromTestCase(module)
+
+            suite_list.append(loader)
+
+        suite_all = unittest.TestSuite(suite_list)
+        unittest.TextTestRunner(verbosity=2).run(suite_all)
 
 class ProcessRegisterar:
     
@@ -130,19 +193,15 @@ class ProcessRegisterar:
         if existing_registered:
             print "Already Registered Processes found:\n%s" % str(existing_registered)
 
-def execute_process_from_cmd(action, daemon, pname, sleep_time, pid_timeout):
+def execute_process_from_cmd(action, daemon, pname, sleep_time, pid_timeout, is_testing):
     """
     Executes the corresponding tasks for a given daemon.
     """
 
     if action in ['start', 'stop', 'restart']:
-        execution_master = DaemonExecutioner(daemon, pname, action, sleep_time, pid_timeout)
+        execution_master = DaemonExecutioner(daemon, pname, action, sleep_time, pid_timeout, is_testing)
     elif action == 'test':
-        print "Not implemented yet."
-        """
-        To be done
-        """
-        #execution_master = TestsExecutioner(runner_name, runner_list)
+        execution_master = DaemonTester(daemon, pname)
     elif action == 'register':
         execution_master = ProcessRegisterar(daemon, pname)
     else:
